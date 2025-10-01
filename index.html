@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI献立ジェネレーター</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans JP', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#EF4444', // Red 500
+                        'secondary': '#FBBF24', // Amber 400
+                        'background': '#F9FAFB', // Gray 50
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* ローディングアニメーション */
+        .dot-pulse {
+            position: relative;
+            left: -9999px;
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background-color: #EF4444;
+            color: #EF4444;
+            box-shadow: 9999px 0 0 -5px;
+            animation: dotPulse 1.5s infinite linear;
+            animation-delay: 0.25s;
+        }
+        .dot-pulse::before, .dot-pulse::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            top: 0;
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background-color: #EF4444;
+            color: #EF4444;
+        }
+        .dot-pulse::before {
+            box-shadow: 9999px 0 0 -5px;
+            left: -12px;
+            animation: dotPulseBefore 1.5s infinite linear;
+            animation-delay: 0s;
+        }
+        @keyframes dotPulseBefore {
+            0% { box-shadow: 9999px 0 0 -5px; }
+            30% { box-shadow: 9999px 0 0 2px; }
+            60%, 100% { box-shadow: 9999px 0 0 -5px; }
+        }
+        @keyframes dotPulse {
+            0% { box-shadow: 9999px 0 0 -5px; }
+            30% { box-shadow: 9999px 0 0 2px; }
+            60%, 100% { box-shadow: 9999px 0 0 -5px; }
+        }
+        @keyframes dotPulseAfter {
+            0% { box-shadow: 10011px 0 0 -5px; }
+            30% { box-shadow: 10011px 0 0 2px; }
+            60%, 100% { box-shadow: 10011px 0 0 -5px; }
+        }
+        /* 免責事項モーダル用に少し大きなサイズを定義 */
+        .modal-lg {
+            max-width: 640px;
+        }
+    </style>
+</head>
+<body class="bg-background min-h-screen p-4 sm:p-8 font-sans">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-primary mb-2">献立 AI シェフ</h1>
+            <p class="text-gray-600 text-lg">食材とモードを選ぶだけで、あなたにぴったりの献立を即座に提案します。</p>
+            
+            <!-- NEW: 免責事項ボタンの移動先 -->
+            <div class="mt-2">
+                <button onclick="showDisclaimer()" class="text-sm text-gray-500 hover:text-gray-700 underline transition duration-150">
+                    免責事項を確認する
+                </button>
+            </div>
+            <!-- END NEW -->
+
+            <p id="userIdDisplay" class="text-xs text-gray-400 mt-2">公開準備モード</p>
+            <p id="statusMessage" class="text-sm text-primary font-medium mt-1">準備完了！食材を入力して提案を開始してください。</p>
+        </header>
+
+        <!-- 献立モード切替エリア -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">
+                🎯 献立モードの選択
+            </h2>
+            <div class="flex space-x-2">
+                <button id="modeNormal" onclick="setMenuMode('normal')"
+                        class="flex-1 py-3 px-4 rounded-xl font-bold transition duration-200 border-2 border-primary bg-primary text-white">
+                    通常モード
+                </button>
+                <button id="modeAllergy" onclick="setMenuMode('allergy')"
+                        class="flex-1 py-3 px-4 rounded-xl font-bold transition duration-200 border-2 border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100">
+                    アレルギー除去モード
+                </button>
+            </div>
+            
+            <!-- アレルゲン入力欄 (初期非表示) -->
+            <div id="allergyInputArea" class="mt-4 hidden transition-all duration-300">
+                <label for="allergensInput" class="block text-sm font-medium text-red-600 mb-2">
+                    ⚠️ 除去したいアレルゲンを入力してください
+                </label>
+                <input type="text" id="allergensInput"
+                       class="w-full p-3 border border-red-400 rounded-lg focus:ring-red-500 focus:border-red-500 transition duration-150" 
+                       placeholder="例：卵、乳製品、小麦、ナッツ類">
+                <p class="text-xs text-gray-500 mt-1">※ 提案される献立からこれらの食材や成分が除外されます。</p>
+            </div>
+        </div>
+
+        <!-- 入力エリア -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <label for="ingredientsInput" class="block text-xl font-semibold text-gray-700 mb-3">
+                🍳 使いたい食材を入力してください
+            </label>
+            <textarea id="ingredientsInput" rows="4" 
+                      class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150" 
+                      placeholder="例：鶏むね肉、玉ねぎ、トマト、卵、冷蔵庫の残り野菜..."></textarea>
+            <button id="generateButton" onclick="generateMenu()"
+                    class="mt-4 w-full bg-primary text-white font-bold py-3 px-4 rounded-xl hover:bg-red-600 transition duration-300 shadow-md disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center">
+                <span id="buttonText">AIに献立を提案してもらう</span>
+                <div id="loadingIndicator" class="hidden ml-3">
+                    <div class="dot-pulse"></div>
+                </div>
+            </button>
+        </div>
+
+        <!-- 結果表示エリア -->
+        <div id="resultsContainer" class="space-y-6">
+            <!-- 結果がここに動的に挿入されます -->
+        </div>
+
+        <!-- モーダルメッセージ用コンテナ (通常メッセージ用) -->
+        <div id="messageBox" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center p-4 z-50">
+            <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+                <h3 class="text-xl font-bold text-primary mb-3" id="modalTitle">エラー</h3>
+                <p id="modalMessage" class="text-gray-700 mb-4">メッセージ</p>
+                <button onclick="hideMessageBox('messageBox')" class="w-full bg-primary text-white font-semibold py-2 rounded-lg hover:bg-red-600 transition">閉じる</button>
+            </div>
+        </div>
+        
+        <!-- 免責事項モーダル -->
+        <div id="disclaimerBox" class="fixed inset-0 bg-gray-900 bg-opacity-70 hidden items-center justify-center p-4 z-50 overflow-y-auto">
+            <div class="bg-white p-6 rounded-xl shadow-2xl modal-lg w-full my-8">
+                <h3 class="text-2xl font-bold text-primary mb-4 border-b pb-2">免責事項</h3>
+                <div class="text-gray-700 text-sm space-y-4 max-h-96 overflow-y-auto pr-2">
+                    <p class="font-semibold">【本サービスのご利用にあたっての重要事項】</p>
+                    <p>
+                        本サービス「献立 AI シェフ」が提案する献立、レシピ、調理のヒントは、大規模言語モデル（AI）によって生成されたものです。以下の点にご注意いただき、ご利用者様ご自身の責任と判断においてご活用ください。
+                    </p>
+                    <ul class="list-disc list-inside space-y-2 pl-4">
+                        <li>**安全性と衛生管理:** 提案されたレシピを実行する際は、食材の鮮度、調理器具の衛生状態、調理時間、加熱温度などを必ずご自身の責任で確認し、食中毒や怪我のないよう細心の注意を払ってください。</li>
+                        <li>**アレルギー対応:** アレルギー除去モードを使用した場合でも、AIの提案が完璧である保証はありません。アレルゲンを含む可能性のある調味料や隠し味、加工食品の使用の有無について、**必ずご自身の目と責任で成分表示を確認してください。** 本サービスは、アレルギーによる健康被害に関して一切の責任を負いません。</li>
+                        <li>**栄養と健康:** 提案される献立は一般的な情報に基づいていますが、特定の疾患を持つ方や厳密な栄養管理が必要な方は、必ず専門医や管理栄養士にご相談ください。本サービスは医療行為や栄養指導の代替ではありません。</li>
+                        <li>**情報の正確性:** AIが提供する情報には、稀に誤りや不正確な情報が含まれる可能性があります。調理手順や分量については、常識の範囲内で調整をお願いいたします。</li>
+                        <li>**利用上の損害:** 本サービスを利用したこと、または利用できなかったことによって生じた一切の損害（直接的、間接的を問わず）について、当方は責任を負いません。</li>
+                    </ul>
+                    <p class="mt-4 text-xs text-gray-500">
+                        本サービスをご利用いただいた時点で、上記の免責事項に同意いただいたものと見なします。
+                    </p>
+                </div>
+                <button onclick="hideMessageBox('disclaimerBox')" class="mt-6 w-full bg-primary text-white font-semibold py-3 rounded-xl hover:bg-red-600 transition">同意して閉じる</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // 公開時のAPI呼び出し先エンドポイント
+        const API_ENDPOINT = '/api/generate'; 
+
+        let currentMode = 'normal'; // 初期モード: normal
+
+        // ===================================================================
+        // 1. UI/メッセージ処理 & モード切替
+        // ===================================================================
+
+        function showMessageBox(title, message, boxId = 'messageBox', isHtml = false) {
+            const box = document.getElementById(boxId);
+            if (boxId === 'messageBox') {
+                document.getElementById('modalTitle').innerText = title;
+                document.getElementById('modalMessage').innerHTML = message;
+            }
+            
+            box.classList.remove('hidden');
+            box.classList.add('flex');
+        }
+
+        window.hideMessageBox = function(boxId) {
+            const box = document.getElementById(boxId);
+            box.classList.add('hidden');
+            box.classList.remove('flex');
+        }
+        
+        window.showDisclaimer = function() {
+            showMessageBox('免責事項', '', 'disclaimerBox');
+        }
+
+        function setLoading(isLoading) {
+            const button = document.getElementById('generateButton');
+            const buttonText = document.getElementById('buttonText');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const ingredientsInput = document.getElementById('ingredientsInput');
+
+            button.disabled = isLoading;
+            ingredientsInput.disabled = isLoading;
+            buttonText.innerText = isLoading ? '献立を考案中...' : 'AIに献立を提案してもらう';
+            loadingIndicator.classList.toggle('hidden', !isLoading);
+        }
+        
+        // 献立モード切替関数
+        window.setMenuMode = function(mode) {
+            currentMode = mode;
+            const normalBtn = document.getElementById('modeNormal');
+            const allergyBtn = document.getElementById('modeAllergy');
+            const allergyArea = document.getElementById('allergyInputArea');
+
+            if (mode === 'allergy') {
+                allergyBtn.classList.replace('bg-gray-50', 'bg-primary');
+                allergyBtn.classList.replace('border-gray-300', 'border-primary');
+                allergyBtn.classList.replace('text-gray-700', 'text-white');
+                normalBtn.classList.replace('bg-primary', 'bg-gray-50');
+                normalBtn.classList.replace('border-primary', 'border-gray-300');
+                normalBtn.classList.replace('text-white', 'text-gray-700');
+                allergyArea.classList.remove('hidden');
+            } else { // normal
+                normalBtn.classList.replace('bg-gray-50', 'bg-primary');
+                normalBtn.classList.replace('border-gray-300', 'border-primary');
+                normalBtn.classList.replace('text-gray-700', 'text-white');
+                allergyBtn.classList.replace('bg-primary', 'bg-gray-50');
+                allergyBtn.classList.replace('border-primary', 'border-gray-300');
+                allergyBtn.classList.replace('text-white', 'text-gray-700');
+                allergyArea.classList.add('hidden');
+            }
+        }
+        
+        window.handleDetailRequest = function(level, dishName, description) {
+            showMessageBox('機能拡張予定', `${dishName} の詳細情報リクエストを受け付けました！\n\n今後、この機能で完全なレシピ、カロリー、栄養バランス、ヘルシーな代替食材などを生成できるようになります。`);
+        }
+
+        function renderResults(menus) {
+            const container = document.getElementById('resultsContainer');
+            container.innerHTML = ''; 
+
+            const colorMap = {
+                '無料シンプル操作': 'bg-green-100 border-green-500 text-green-800',
+                'ちょっと凝ったもの': 'bg-yellow-100 border-yellow-500 text-yellow-800',
+                '課金レベル': 'bg-primary border-primary text-red-800' // サーバー側が「課金レベル」で返すため、ここで対応
+            };
+
+            const titleMap = {
+                '無料シンプル操作': '時短・お手軽献立 (無料シンプル)',
+                'ちょっと凝ったもの': 'ひと工夫凝った献立',
+                '課金レベル': '🍚 究極のズボラ飯！'
+            };
+
+            const iconMap = {
+                '無料シンプル操作': '⚡️',
+                'ちょっと凝ったもの': '✨',
+                '課金レベル': '🔥'
+            };
+
+
+            menus.forEach((menu, index) => {
+                const levelKey = menu.level; // サーバーレス機能はJSONスキーマに合わせて「課金レベル」を返します
+                const bgColor = colorMap[levelKey] || 'bg-gray-100 border-gray-500 text-gray-800';
+                const levelTitle = titleMap[levelKey] || menu.level;
+                const levelIcon = iconMap[levelKey] || '🍽️';
+                
+                const card = `
+                    <div class="bg-white p-6 rounded-xl shadow-lg border-t-8 ${bgColor.split(' ')[1]}">
+                        <h2 class="text-2xl font-extrabold flex items-center mb-3">
+                            <span class="mr-2 text-3xl">${levelIcon}</span>
+                            <span class="${bgColor.split(' ').filter(c => c.startsWith('text-'))[0]}">${levelTitle}</span>
+                        </h2>
+                        
+                        <div class="space-y-4 mb-4">
+                            <!-- 献立名 -->
+                            <div>
+                                <h3 class="text-xl font-bold text-gray-800">${menu.dishName}</h3>
+                                <p class="text-sm text-gray-600 mt-1">${menu.description}</p>
+                            </div>
+
+                            <!-- レシピサマリー -->
+                            <div>
+                                <p class="text-lg font-semibold text-gray-700 mb-2">調理のポイント</p>
+                                <div class="bg-gray-50 p-3 rounded-lg text-gray-700 text-sm leading-relaxed whitespace-normal text-left">
+                                    ${menu.recipeSummary}
+                                
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ボタンエリア -->
+                        <div class="space-y-2 mt-4">
+                            <button onclick="handleDetailRequest('${levelKey}', '${menu.dishName}', '詳細レシピ')"
+                                class="w-full bg-secondary text-white font-bold py-3 rounded-xl hover:bg-amber-500 transition duration-300 shadow-md flex items-center justify-center">
+                                📝 詳細レシピ生成 (調理手順/分量)
+                            </button>
+                            
+                            <button onclick="handleDetailRequest('${levelKey}', '${menu.dishName}', '栄養分析')"
+                                class="w-full bg-indigo-500 text-white font-bold py-3 rounded-xl hover:bg-indigo-600 transition duration-300 shadow-md flex items-center justify-center">
+                                📊 栄養分析 & ヘルシー代替案
+                            </button>
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', card);
+            });
+        }
+
+        // ===================================================================
+        // 3. サーバーレス機能呼び出しロジック
+        // ===================================================================
+
+        window.generateMenu = async function() {
+            const ingredients = document.getElementById('ingredientsInput').value.trim();
+            const allergens = currentMode === 'allergy' ? document.getElementById('allergensInput').value.trim() : '';
+
+            if (ingredients.length < 5) {
+                showMessageBox('入力不足', '使いたい食材やキーワードをもう少し詳しく入力してください。');
+                return;
+            }
+            if (currentMode === 'allergy' && allergens.length < 2) {
+                showMessageBox('アレルゲンが未入力', '除去したいアレルゲンを具体的に入力してください（例：卵、乳製品）。');
+                return;
+            }
+
+            setLoading(true);
+            document.getElementById('resultsContainer').innerHTML = '';
+
+            // サーバーレス機能に渡すペイロードにモード情報とアレルゲンを追加
+            const payload = {
+                ingredients: ingredients,
+                mode: currentMode,
+                allergens: allergens
+            };
+
+            try {
+                // サーバーレス機能のエンドポイントを呼び出す
+                const response = await fetchWithRetry(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorDetails = await response.json().catch(() => ({}));
+                    const errorMessage = errorDetails.error || `サーバー側でエラーが発生しました。ステータス: ${response.status}`;
+                    throw new Error(errorMessage);
+                }
+
+                const result = await response.json();
+                
+                const menuData = result.menuData;
+                
+                if (!Array.isArray(menuData) || menuData.length < 3) {
+                    console.error("生成されたJSONデータ:", menuData);
+                    throw new Error("献立の提案に失敗しました。サーバーの設定を確認してください。");
+                }
+
+                renderResults(menuData);
+
+            } catch (error) {
+                console.error("献立生成エラー:", error);
+                showMessageBox('献立生成エラー', `献立の生成中にエラーが発生しました。このアプリはサーバーレス機能が必要です。詳細: ${error.message}`);
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        async function fetchWithRetry(url, options, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status !== 429) {
+                        return response;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000 + Math.random() * 1000));
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000 + Math.random() * 1000));
+                }
+            }
+        }
+
+        window.onload = () => {
+            setMenuMode('normal'); 
+        };
+    </script>
+</body>
+</html>
