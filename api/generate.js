@@ -79,7 +79,7 @@ module.exports = async (req, res) => {
         - 'ちょっと凝ったもの': 20分から30分程度の調理時間で、見た目や味に「ひと工夫」を加えた、家族やゲストも喜ぶ献立を提案してください。
         - '課金レベル': 豪華さ、専門的な知識、栄養バランスの最適解など、高度な付加価値を持たせた特別で魅力的な献立を提案してください。
 
-        各献立の『調理のポイント』(\`recipeSummary\`)は、**HTMLの箇条書きタグ \`<ul><li>...</li></ul>\`** を使用して、具体的な手順と重要事項を記載してください。`; // <-- 修正箇所: ここでバックスラッシュが不要な部分を削除し、正しくテンプレートリテラルを閉じるようにしました。
+        各献立の『調理のポイント』(\`recipeSummary\`)は、**HTMLの箇条書きタグ \`<ul><li>...</li></ul>\`** を使用して、具体的な手順と重要事項を記載してください。`;
         
         // アレルギーモードの制約を追加
         if (mode === 'allergy' && allergens) {
@@ -97,7 +97,8 @@ ${mode === 'allergy' && allergens ? `除去すべきアレルゲン: ${allergens
         const payload = {
             contents: [{ parts: [{ text: userPrompt }] }],
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            config: {
+            // 🚨 ここを generationConfig に修正
+            generationConfig: { 
                 // モデルに対してJSON形式での出力を指示
                 responseMimeType: "application/json",
                 responseSchema: responseSchema,
