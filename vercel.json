@@ -1,14 +1,13 @@
 {
   "functions": {
     "api/generate.js": {
-      "includeFiles": [
-        "node_modules/@google/genai/**"
-      ]
+      "includeFiles": "node_modules/@google/genai/**"
     },
     "api/detail.js": {
-      "includeFiles": [
-        "node_modules/@google/genai/**"
-      ]
+      "includeFiles": "node_modules/@google/genai/**"
+    },
+    "api/analyze.js": {
+      "includeFiles": "node_modules/@google/genai/**"
     }
   }
 }
