@@ -1,7 +1,14 @@
 {
   "functions": {
-    "api/**/*.js": {
-      "runtime": "@vercel/node@3.0.0"
+    "api/generate.js": {
+      "includeFiles": [
+        "node_modules/@google/genai/**"
+      ]
+    },
+    "api/detail.js": {
+      "includeFiles": [
+        "node_modules/@google/genai/**"
+      ]
     }
   }
 }
