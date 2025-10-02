@@ -1,145 +1,105 @@
-/**
- * Vercel Serverless Function (Node.js) のエントリーポイント
- * * この関数は、献立 AI シェフ (index.html) からの POST リクエストを受け取り、
- * Google Gemini APIを呼び出して献立の提案をJSON形式で返します。
- * * Vercelの環境変数に GEMINI_API_KEY を設定する必要があります。
- */
+const { GoogleGenAI } = require('@google/genai');
 
-// Vercelで設定された環境変数からAPIキーを読み込む
-// 🚨 注意: この環境では process.env は使用できませんが、Vercelデプロイ用に記述します。
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
-
-// 献立のJSONスキーマ定義: 3つの献立レベルの配列を返すことをモデルに保証させる
-const responseSchema = {
-    type: "ARRAY",
-    items: {
-        type: "OBJECT",
-        properties: {
-            "level": { 
-                type: "STRING", 
-                description: "献立レベル。以下の3つのいずれか: '無料シンプル操作', 'ちょっと凝ったもの', '課金レベル'。" 
-            },
-            "dishName": { 
-                type: "STRING", 
-                description: "献立のメインの料理名（例: 鶏むね肉と野菜の和風炒め）" 
-            },
-            "description": { 
-                type: "STRING", 
-                description: "献立の簡潔な説明（例: 時短・ヘルシー、豪華な一品など）" 
-            },
-            "recipeSummary": { 
-                type: "STRING", 
-                description: "レシピの簡単調理のポイント、目安調理時間、重要事項などを箇条書きにしたサマリー。HTMLの <ul><li>...</li></ul> タグを使用すること。" 
-            }
-        },
-        required: ["level", "dishName", "description", "recipeSummary"],
-        propertyOrdering: ["level", "dishName", "description", "recipeSummary"]
-    }
-};
+// APIキーは環境変数から自動的に読み込まれます
+const ai = new GoogleGenAI({});
 
 /**
- * サーバーレス機能のエントリポイント (Vercel向け)
- * @param {object} req - HTTPリクエストオブジェクト (ボディに ingredients, mode, allergens を含む)
- * @param {object} res - HTTPレスポンスオブジェクト
+ * 献立の提案とレシピの要約を生成するためのサーバーレス関数
+ * @param {Object} req - Vercelからのリクエストオブジェクト
+ * @param {Object} res - Vercelへのレスポンスオブジェクト
  */
 module.exports = async (req, res) => {
-    // APIキーがない場合はエラーを返す
-    if (!GEMINI_API_KEY) {
-        return res.status(500).json({ 
-            error: "Internal Server Error", 
-            message: "APIキーが設定されていません。Vercel環境変数に 'GEMINI_API_KEY' を設定してください。"
-        });
+    // CORSヘッダーを設定 (セキュリティ上の理由から、必要に応じてオリジンを制限してください)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // OPTIONSメソッドへの対応（プリフライトリクエスト）
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
 
-    // POSTメソッド以外は許可しない
     if (req.method !== 'POST') {
-        return res.status(405).json({ 
-            error: "Method Not Allowed", 
-            message: "POSTリクエストのみを受け付けます。" 
-        });
+        return res.status(405).json({ message: 'Method Not Allowed' });
     }
 
     try {
         const { ingredients, mode, allergens } = req.body;
 
         if (!ingredients) {
-            return res.status(400).json({ 
-                error: "Bad Request", 
-                message: "食材の入力が必要です。" 
-            });
+            return res.status(400).json({ message: '食材が入力されていません。' });
         }
-        
-        // システムインストラクションの構築
-        let systemInstruction = `あなたは世界最高の献立AIシェフです。ユーザーから提供された食材、モード、制約条件に従い、以下の3つの異なる献立レベルの提案をJSON形式の配列で正確に生成してください。
-        
-        献立レベルは、必ず '無料シンプル操作', 'ちょっと凝ったもの', '課金レベル' の3つ全てを提案してください。
-        
-        - '無料シンプル操作': 5分から15分程度の超時短、最も簡単な調理工程で、冷蔵庫の残り物も使い切る現実的な献立を提案してください。
-        - 'ちょっと凝ったもの': 20分から30分程度の調理時間で、見た目や味に「ひと工夫」を加えた、家族やゲストも喜ぶ献立を提案してください。
-        - '課金レベル': 豪華さ、専門的な知識、栄養バランスの最適解など、高度な付加価値を持たせた特別で魅力的な献立を提案してください。
 
-        各献立の『調理のポイント』(\`recipeSummary\`)は、**HTMLの箇条書きタグ \`<ul><li>...</li></ul>\`** を使用して、具体的な手順と重要事項を記載してください。`;
-        
-        // アレルギーモードの制約を追加
-        if (mode === 'allergy' && allergens) {
-            systemInstruction += `\n\n【最重要制約】提案するすべての献立は、ユーザーが指定したアレルゲン **${allergens}** を含む食材や調味料を完全に排除しなければなりません。AIの提案が原因で健康被害が発生しないよう、細心の注意を払ってください。`;
-        }
-        
-        // ユーザープロンプト
-        const userPrompt = `現在のモード: ${mode}
-使用したい食材: ${ingredients}
-${mode === 'allergy' && allergens ? `除去すべきアレルゲン: ${allergens}` : ''}
-
-上記の条件に基づき、3つのレベルの献立提案をJSON形式でお願いします。`;
-
-
-        const payload = {
-            contents: [{ parts: [{ text: userPrompt }] }],
-            systemInstruction: { parts: [{ text: systemInstruction }] },
-            // 🚨 ここを generationConfig に修正
-            generationConfig: { 
-                // モデルに対してJSON形式での出力を指示
-                responseMimeType: "application/json",
-                responseSchema: responseSchema,
-                temperature: 0.8, 
+        // 構造化された応答のためのJSONスキーマ
+        const schema = {
+            type: "ARRAY",
+            description: "異なるレベルの献立提案のリスト",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    "level": {
+                        "type": "STRING",
+                        "description": "献立のレベル（「究極のズボラ飯 (5分以内)」「手軽・時短献立」「豪華レベルアップ献立」のいずれか）", 
+                        "enum": ["究極のズボラ飯 (5分以内)", "手軽・時短献立", "豪華レベルアップ献立"] 
+                    },
+                    "dishName": { "type": "STRING", "description": "提案する献立の名称" },
+                    "description": { "type": "STRING", "description": "献立の魅力や特徴を説明するキャッチーな短い一文" },
+                    "recipeSummary": { "type": "STRING", "description": "調理のポイント、節約術、簡単な手順を箇条書きでまとめたHTML（<ul><li>タグを使用）" },
+                },
+                required: ["level", "dishName", "description", "recipeSummary"]
             }
         };
 
-        // Gemini APIを呼び出し
-        const apiResponse = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload)
+        let modeInstruction = '';
+        if (mode === 'health') {
+            modeInstruction = '低カロリー・高タンパクなヘルシー志向で、健康を意識した献立を中心に提案してください。';
+        } else if (mode === 'allergy' && allergens) {
+            modeInstruction = `アレルギー対応のため、以下の食材は絶対に使用しないでください: ${allergens}。`;
+        } else {
+            modeInstruction = '一般的な献立で、節約と時短を優先して提案してください。';
+        }
+
+        const systemPrompt = `
+            あなたは「献立の救世主」AIです。ユーザーの入力食材とモードに基づいて、三つの異なるレベルの献立（究極のズボラ飯、手軽・時短、豪華レベルアップ）を提案してください。
+            
+            全ての献立において、物価高を意識した**節約**と、忙しい人に向けた**時短**を最優先してください。
+
+            各レベルの提案の制約は以下の通りです:
+            
+            1. **究極のズボラ飯 (5分以内)**: 貧乏でも安く、手軽にすぐ作れる超手抜き献立の提案。調理時間は最大でも5分以内に収まるようにしてください。火を使わない、またはレンチンのみのレシピを優先してください。
+            2. **手軽・時短献立**: 10分〜20分程度で調理が完了する、手軽だが満足度の高い献立を提案してください。
+            3. **豪華レベルアップ献立**: 30分程度で、見た目や味が「今日の食卓は豪華！」と感じられるような、少し手間をかけた献立を提案してください。ただし、調理の手間は最小限に抑えてください。
+            
+            ユーザーの希望する食材は「${ingredients}」です。
+            ${modeInstruction}
+            
+            JSONスキーマに厳密に従って、献立提案をリスト（配列）で返してください。
+        `;
+
+        const userPrompt = `食材: ${ingredients}、モード: ${mode}（アレルゲン: ${allergens || 'なし'}）で、上記の3つのレベルに合う献立を提案してください。`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json",
+                responseSchema: schema,
+            }
         });
 
-        if (!apiResponse.ok) {
-            const errorText = await apiResponse.text();
-            throw new Error(`Gemini API呼び出し中にエラーが発生しました: ${apiResponse.status} - ${errorText.substring(0, 100)}...`);
-        }
-
-        const apiResult = await apiResponse.json();
-        
-        const jsonText = apiResult.candidates?.[0]?.content?.parts?.[0]?.text;
-        
-        if (!jsonText) {
-             throw new Error("APIレスポンスからJSONテキストを抽出できませんでした。");
-        }
-        
-        // JSON文字列をパース
+        // 応答テキストを解析
+        const jsonText = response.text.trim();
         const menuData = JSON.parse(jsonText);
-        
-        // 成功レスポンスをフロントエンドに返す
-        res.status(200).json({ menuData: menuData });
+
+        res.status(200).json({ menuData });
 
     } catch (error) {
-        console.error("サーバーレス機能の処理エラー:", error);
-        // エラー詳細をクライアントに返す
+        console.error('Gemini API呼び出し中にエラーが発生しました:', error.message);
+        // エラー詳細を返す
         res.status(500).json({ 
-            error: "Internal Server Error", 
-            message: `献立生成処理中にエラーが発生しました: ${error.message}` 
+            message: `献立生成エラー: Internal Server Error. ${error.message}`,
+            error: error.message 
         });
     }
 };
