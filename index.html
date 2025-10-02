@@ -269,10 +269,10 @@
             const resultsArea = document.getElementById('results-area');
             resultsArea.innerHTML = ''; // 結果エリアをクリア
 
-            // 献立レベルの表示順を定義
+            // 献立レベルの表示順を定義 (修正: 手軽・時短献立が2番目)
             const order = {
-                'ズボラ飯 (5分以内)': 1, // 新名称
-                '時短・お手軽献立': 2,
+                '究極のズボラ飯 (5分以内)': 1, 
+                '手軽・時短献立': 2, // 修正
                 '豪華レベルアップ献立': 3
             };
 
@@ -288,11 +288,11 @@
                 let levelColor = '';
 
                 // レベルに応じてデザインと名称を決定
-                if (levelName === 'ズボラ飯 (5分以内)') {
+                if (levelName === '究極のズボラ飯 (5分以内)') {
                     cardClass = 'bg-yellow-50 border-yellow-300';
                     levelIcon = '😴'; // ズボラ
                     levelColor = 'bg-yellow-500';
-                } else if (levelName === '時短・お手軽献立') {
+                } else if (levelName === '手軽・時短献立') { // 修正
                     cardClass = 'bg-green-50 border-green-300';
                     levelIcon = '⏱️'; // 時短
                     levelColor = 'bg-green-500';
@@ -327,11 +327,20 @@
                             </div>
                         </div>
                         
-                        <!-- 詳細レシピボタンを追加 -->
-                        <button class="w-full bg-pink-100 text-pink-600 font-semibold py-2 rounded-xl hover:bg-pink-200 transition duration-150 text-sm"
-                                onclick="fetchDetailRecipe('${menu.dishName}')">
-                            <span class="mr-1">📄</span> 詳細レシピを見る (材料・手順)
-                        </button>
+                        <!-- ボタンコンテナ -->
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <!-- 詳細レシピボタン -->
+                            <button class="w-full sm:w-1/2 bg-pink-100 text-pink-600 font-semibold py-2 rounded-xl hover:bg-pink-200 transition duration-150 text-sm"
+                                    onclick="fetchDetailRecipe('${menu.dishName}')">
+                                <span class="mr-1">📄</span> 詳細レシピを見る
+                            </button>
+                            
+                            <!-- 栄養分析ボタン (新規追加) -->
+                            <button class="w-full sm:w-1/2 bg-green-100 text-green-600 font-semibold py-2 rounded-xl hover:bg-green-200 transition duration-150 text-sm"
+                                    onclick="fetchNutritionAnalysis('${menu.dishName}')">
+                                <span class="mr-1">📈</span> 栄養分析
+                            </button>
+                        </div>
                     </div>
                 `;
                 resultsArea.insertAdjacentHTML('beforeend', cardHtml);
@@ -343,7 +352,6 @@
          * @param {string} dishName - 詳細を取得したい献立名
          */
         async function fetchDetailRecipe(dishName) {
-            const modal = document.getElementById('recipe-modal');
             const modalName = document.getElementById('modal-dish-name');
             const modalContent = document.getElementById('modal-content-area');
             const modalSpinner = document.getElementById('modal-loading-spinner');
@@ -360,6 +368,7 @@
             
             try {
                 // 新しく作成したサーバーレス関数 /api/detail を呼び出す
+                // サーバーレス関数がない場合のエラーを解消するため、api/detail.js を作成します
                 const response = await fetch('/api/detail', {
                     method: 'POST',
                     headers: {
@@ -373,9 +382,17 @@
                 });
 
                 if (!response.ok) {
-                    const errorJson = await response.json();
-                    let message = errorJson.message || `詳細レシピ生成エラー: ステータス: ${response.status}`;
-                    throw new Error(message);
+                    // JSONエラーではなく、サーバーからのエラーレスポンスを正しく処理する
+                    let errorText;
+                    try {
+                        // 応答がJSON形式であれば解析
+                        const errorJson = await response.json();
+                        errorText = errorJson.message || `ステータス: ${response.status}`;
+                    } catch {
+                        // 応答がJSON形式でなければテキストとして取得
+                        errorText = await response.text();
+                    }
+                    throw new Error(errorText);
                 }
 
                 const data = await response.json();
@@ -389,6 +406,13 @@
                 // UIを通常状態に戻す
                 modalSpinner.classList.add('hidden');
             }
+        }
+        
+        /**
+         * 栄養分析のダミー処理（未実装）
+         */
+        function fetchNutritionAnalysis(dishName) {
+            showMessageBox(`「${dishName}」の栄養分析機能を実行しようとしましたが、現在この機能はまだ開発中です！😋`);
         }
 
         /**
@@ -427,7 +451,7 @@
         function formatSummary(summaryHtml) {
             // AIが <ul><li>タグを使用する前提で、それを <ol><li>に変換
             if (summaryHtml.includes('<ul>')) {
-                // <ul> を <ol class="list-none space-y-2"> に置換
+                // <ul> を <ul class="list-none space-y-2"> に置換
                 summaryHtml = summaryHtml.replace(/<ul\s*[^>]*>/gi, '<ul class="list-none space-y-2">');
                 // </ul> を </ul> に置換（番号はAI側で付与される前提）
                 summaryHtml = summaryHtml.replace(/<\/ul\s*[^>]*>/gi, '</ul>');
