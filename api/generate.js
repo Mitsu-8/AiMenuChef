@@ -1,105 +1,173 @@
-const { GoogleGenAI } = require('@google/genai');
-
-// APIキーは環境変数から自動的に読み込まれます
-const ai = new GoogleGenAI({});
-
 /**
- * 献立の提案とレシピの要約を生成するためのサーバーレス関数
- * @param {Object} req - Vercelからのリクエストオブジェクト
- * @param {Object} res - Vercelへのレスポンスオブジェクト
+ * AI献立生成APIエンドポイント
+ * この関数は、ユーザーが入力した食材と選択したモードに基づき、
+ * Gemini APIを呼び出して、3種類の献立レベル（究極のズボラ飯、手軽・時短献立、ちょっと奮発献立）
+ * のレシピをJSON形式で生成します。
  */
-module.exports = async (req, res) => {
-    // CORSヘッダーを設定 (セキュリティ上の理由から、必要に応じてオリジンを制限してください)
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+async function generateContent(request, response) {
+    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
+    const apiKey = ""; // APIキーは実行環境で自動的に提供されます
 
-    // OPTIONSメソッドへの対応（プリフライトリクエスト）
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
+    if (request.method !== 'POST') {
+        return response.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    if (req.method !== 'POST') {
-        return res.status(405).json({ message: 'Method Not Allowed' });
+    const { ingredients, mode, allergens } = request.body;
+
+    // 1. 入力検証
+    if (!ingredients || typeof ingredients !== 'string' || ingredients.trim() === "") {
+        return response.status(400).json({ error: '食材 (ingredients) の入力は必須です。' });
     }
+    const validModes = ['normal', 'healthy', 'allergy'];
+    if (!validModes.includes(mode)) {
+        return response.status(400).json({ error: '無効な献立モードです。' });
+    }
+    if (mode === 'allergy' && (!allergens || typeof allergens !== 'string' || allergens.trim() === "")) {
+        return response.status(400).json({ error: 'アレルギー除去モードでは、除去食材 (allergens) の入力は必須です。' });
+    }
+    
+    // 2. プロンプトとシステムインストラクションの構築
+    const modeDescription = {
+        'normal': '物価高対策と時短を重視し、安価で手軽にできる献立を最優先に考えてください。',
+        'healthy': '健康と栄養バランスを重視し、低カロリーで高タンパクな食材や野菜を多く使う献立を提案してください。',
+        'allergy': `アレルギーを持つ人が安心して食べられるよう、以下の食材・アレルゲンを完全に除去した献立を提案してください: ${allergens}`
+    };
 
-    try {
-        const { ingredients, mode, allergens } = req.body;
+    const systemInstruction = {
+        parts: [{ 
+            text: `
+                あなたはプロの献立アドバイザーです。
+                ユーザーが提供した食材と以下のモードに基づき、最適な献立を3種類提案してください。
+                
+                ---
+                献立の評価軸: ${modeDescription[mode]}
+                ---
 
-        if (!ingredients) {
-            return res.status(400).json({ message: '食材が入力されていません。' });
-        }
+                提案する3種類の献立レベルと要件は以下の通りです:
+                1. 究極のズボラ飯: 貧乏でも、手間も時間もかけず、超安価でできる献立。調理時間は10分以内。
+                2. 手軽・時短献立: 通常の、手軽に時短でできる献立。調理時間は20分以内。
+                3. ちょっと奮発献立: ちょっとだけ手間と食材を使った、満足度の高い献立。調理時間は30分以内。
 
-        // 構造化された応答のためのJSONスキーマ
-        const schema = {
-            type: "ARRAY",
-            description: "異なるレベルの献立提案のリスト",
-            items: {
-                type: "OBJECT",
-                properties: {
-                    "level": {
-                        "type": "STRING",
-                        "description": "献立のレベル（「究極のズボラ飯 (5分以内)」「手軽・時短献立」「豪華レベルアップ献立」のいずれか）", 
-                        "enum": ["究極のズボラ飯 (5分以内)", "手軽・時短献立", "豪華レベルアップ献立"] 
+                献立は必ず以下のJSONスキーマに従い、日本語で回答してください。
+            `
+        }]
+    };
+    
+    const userQuery = `
+        使用したい食材: ${ingredients}
+        ${mode === 'allergy' ? `絶対に除去すべき食材: ${allergens}` : ''}
+        
+        上記の要件と食材に基づき、3種類の献立レベル全てについて、それぞれ1つのレシピをJSON形式で提案してください。
+    `;
+
+
+    // 3. JSONスキーマの定義
+    const recipeSchema = {
+        type: "OBJECT",
+        properties: {
+            "recipes": {
+                type: "ARRAY",
+                description: "提案する3種類の献立（究極のズボラ飯、手軽・時短献立、ちょっと奮発献立）のリスト。",
+                items: {
+                    type: "OBJECT",
+                    properties: {
+                        "level": { 
+                            type: "STRING", 
+                            description: "献立のレベル。以下のいずれかであること: 究極のズボラ飯, 手軽・時短献立, ちょっと奮発献立" 
+                        },
+                        "dishName": { 
+                            type: "STRING", 
+                            description: "献立名（料理名）。" 
+                        },
+                        "description": { 
+                            type: "STRING", 
+                            description: "献立の簡潔な魅力の説明文。物価高・時短・ヘルシーなどのモードに合わせた説明を入れること。" 
+                        },
+                        "ingredients": {
+                            type: "ARRAY",
+                            description: "その料理に必要な主な材料のリスト（調味料を除く）。",
+                            items: { type: "STRING" }
+                        },
+                        "markdown_recipe": { 
+                            type: "STRING", 
+                            description: "作り方を番号付きリスト（1. 2. 3. ...）形式のMarkdownで記述したもの。必ず日本語でステップバイステップで記述すること。" 
+                        }
                     },
-                    "dishName": { "type": "STRING", "description": "提案する献立の名称" },
-                    "description": { "type": "STRING", "description": "献立の魅力や特徴を説明するキャッチーな短い一文" },
-                    "recipeSummary": { "type": "STRING", "description": "調理のポイント、節約術、簡単な手順を箇条書きでまとめたHTML（<ul><li>タグを使用）" },
-                },
-                required: ["level", "dishName", "description", "recipeSummary"]
+                    required: ["level", "dishName", "description", "ingredients", "markdown_recipe"]
+                }
             }
-        };
+        },
+        required: ["recipes"]
+    };
 
-        let modeInstruction = '';
-        if (mode === 'health') {
-            modeInstruction = '低カロリー・高タンパクなヘルシー志向で、健康を意識した献立を中心に提案してください。';
-        } else if (mode === 'allergy' && allergens) {
-            modeInstruction = `アレルギー対応のため、以下の食材は絶対に使用しないでください: ${allergens}。`;
-        } else {
-            modeInstruction = '一般的な献立で、節約と時短を優先して提案してください。';
+    // 4. APIペイロードの構築
+    const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        
+        // 外部の最新情報を利用するため、Google Search Groundingを有効にする
+        tools: [{ "google_search": {} }], 
+        
+        systemInstruction: systemInstruction,
+        
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: recipeSchema,
+        }
+    };
+
+    // 5. API呼び出しとリトライロジック
+    const maxRetries = 3;
+    let lastError = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const fetchUrl = GEMINI_API_URL + apiKey;
+            const fetchOptions = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            };
+
+            const apiResponse = await fetch(fetchUrl, fetchOptions);
+
+            if (!apiResponse.ok) {
+                const errorDetail = await apiResponse.json();
+                throw new Error(`API呼び出しエラー: ${apiResponse.status} - ${JSON.stringify(errorDetail)}`);
+            }
+
+            const result = await apiResponse.json();
+
+            // 応答の解析
+            const candidate = result.candidates?.[0];
+            if (candidate && candidate.content?.parts?.[0]?.text) {
+                const jsonText = candidate.content.parts[0].text;
+                
+                try {
+                    const parsedJson = JSON.parse(jsonText);
+                    // 6. 成功応答
+                    return response.status(200).json(parsedJson);
+                } catch (e) {
+                    console.error('JSONパースエラー:', e);
+                    lastError = new Error(`AI応答のJSONパースに失敗しました: ${jsonText}`);
+                }
+            } else {
+                lastError = new Error('AIからの応答に有効な内容が含まれていません。');
+            }
+        } catch (error) {
+            console.error(`Attempt ${attempt + 1} failed:`, error.message);
+            lastError = error;
         }
 
-        const systemPrompt = `
-            あなたは「献立の救世主」AIです。ユーザーの入力食材とモードに基づいて、三つの異なるレベルの献立（究極のズボラ飯、手軽・時短、豪華レベルアップ）を提案してください。
-            
-            全ての献立において、物価高を意識した**節約**と、忙しい人に向けた**時短**を最優先してください。
-
-            各レベルの提案の制約は以下の通りです:
-            
-            1. **究極のズボラ飯 (5分以内)**: 貧乏でも安く、手軽にすぐ作れる超手抜き献立の提案。調理時間は最大でも5分以内に収まるようにしてください。火を使わない、またはレンチンのみのレシピを優先してください。
-            2. **手軽・時短献立**: 10分〜20分程度で調理が完了する、手軽だが満足度の高い献立を提案してください。
-            3. **豪華レベルアップ献立**: 30分程度で、見た目や味が「今日の食卓は豪華！」と感じられるような、少し手間をかけた献立を提案してください。ただし、調理の手間は最小限に抑えてください。
-            
-            ユーザーの希望する食材は「${ingredients}」です。
-            ${modeInstruction}
-            
-            JSONスキーマに厳密に従って、献立提案をリスト（配列）で返してください。
-        `;
-
-        const userPrompt = `食材: ${ingredients}、モード: ${mode}（アレルゲン: ${allergens || 'なし'}）で、上記の3つのレベルに合う献立を提案してください。`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-            config: {
-                systemInstruction: systemPrompt,
-                responseMimeType: "application/json",
-                responseSchema: schema,
-            }
-        });
-
-        // 応答テキストを解析
-        const jsonText = response.text.trim();
-        const menuData = JSON.parse(jsonText);
-
-        res.status(200).json({ menuData });
-
-    } catch (error) {
-        console.error('Gemini API呼び出し中にエラーが発生しました:', error.message);
-        // エラー詳細を返す
-        res.status(500).json({ 
-            message: `献立生成エラー: Internal Server Error. ${error.message}`,
-            error: error.message 
-        });
+        if (attempt < maxRetries - 1) {
+            // 指数関数的バックオフ
+            const delay = Math.pow(2, attempt) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     }
-};
+
+    // 7. 失敗応答
+    return response.status(500).json({ error: `献立生成に失敗しました。AIからの有効な応答が得られませんでした。（${lastError.message}）` });
+}
+
+// Canvas環境でこの関数をエクスポートする
+module.exports = generateContent;
