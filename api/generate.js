@@ -16,7 +16,7 @@ const responseSchema = {
         properties: {
             "level": { 
                 type: "STRING", 
-                description: "献立レベル。以下の3つのいずれか: '究極のズボラ飯', '手軽・時短献立', 'ちょっと奮発献立'。" 
+                description: "献立レベル。以下の3つのいずれか: '究極のズボラ飯', '手軽・時短献立', 'ちょっとひと手間献立'。" 
             },
             "dishName": { 
                 type: "STRING", 
