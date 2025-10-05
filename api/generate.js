@@ -1,6 +1,6 @@
 /**
  * Vercel Serverless Function (Node.js) のエントリーポイント
- * * この関数は、献立 AI シェフ (index.html) からの POST リクエストを受け取り、
+ * * この関数は、らくちん AI レシピ (index.html) からの POST リクエストを受け取り、
  * Google Gemini APIを呼び出して献立の提案をJSON形式で返します。
  * * Vercelの環境変数に GEMINI_API_KEY を設定する必要があります。
  */
@@ -16,7 +16,7 @@ const responseSchema = {
         properties: {
             "level": { 
                 type: "STRING", 
-                description: "献立レベル。以下の3つのいずれか: '無料シンプル操作', 'ちょっと凝ったもの', '課金レベル'。" 
+                description: "献立レベル。以下の3つのいずれか: '究極のズボラ飯', 'お手軽・時短献立', 'ちょっとひと手間献立'。" 
             },
             "dishName": { 
                 type: "STRING", 
@@ -28,7 +28,7 @@ const responseSchema = {
             },
             "recipeSummary": { 
                 type: "STRING", 
-                description: "レシピの簡単調理のポイント、目安調理時間、重要事項などを箇条書きにしたサマリー。HTMLの <ul><li>...</li></ul> タグを使用すること。" 
+                description: "レシピの簡単調理のポイント、目安調理時間、重要事項などを箇条書き（先頭に順番付き）にしたサマリー。HTMLの <ul><li>...</li></ul> タグを使用すること。" 
             }
         },
         required: ["level", "dishName", "description", "recipeSummary"],
