@@ -32,7 +32,7 @@ const responseSchema = {
             },
             "recipe": { 
                 type: "STRING",
-                description: "目安調理時間と、5ステップ程度の簡潔な調理手順を必ず番号付きリスト（例: 1. ..., 2. ...）で１手順ずつ改行入れて箇条書きのMarkdown形式で記述。"
+                description: "5ステップ程度の簡潔な調理手順を必ず番号付きリスト（例: 1. ..., 2. ...）で、必ず１手順ずつ改行入れて箇条書き、目安調理時間も表示、のMarkdown形式で記述。"
             },
         },
         required: ["level", "dishName", "dishDescription", "requiredIngredients", "recipe"],
@@ -73,7 +73,8 @@ function buildPrompt(ingredients, mode, allergens) {
     }
     
     // 献立レベルのガイドラインを追記
-    systemInstruction += `提案する3つの献立の「level」は、それぞれ以下の3つのレベルに振り分けてください: 1.「究極のズボラ飯」（超簡単・5分以内目標）, 2.「手軽・時短献立」（10〜20分目標）, 3.「ちょっと奮発献立」（20分以上の調理または少し手間がかかるもの）。`;
+    systemInstruction += `提案する3つの献立の「level」は、それぞれ以下の3つのレベルに振り分けてください: 1.「究極のズボラ飯」（お金をかけずに超簡単・5分以内目標）, 2.「手軽・時短献立」（お手軽で時短で簡単・10〜20分目標）, 3.「ちょっとひと手間献立」（調理または少し手間がかかる献立・20～30分目標）。`;
+    systemInstruction += `全ての献立を提案するにあたり、現在の物価高に加え、国民の手取り額も上がらない状況を考慮し、できるだけ安価な食材・調味料を使って現実的なものにすること。`;
 
     return { basePrompt, systemInstruction };
 }
