@@ -32,7 +32,7 @@ const responseSchema = {
             },
             "recipe": { 
                 type: "STRING",
-                description: "5ステップ程度の簡潔な調理手順を、必ず番号付きリスト（例: 1. ..., 2. ...）で箇条書きのMarkdown形式で記述。"
+                description: "目安調理時間と、5ステップ程度の簡潔な調理手順を必ず番号付きリスト（例: 1. ..., 2. ...）で１手順ずつ改行入れて箇条書きのMarkdown形式で記述。"
             },
         },
         required: ["level", "dishName", "dishDescription", "requiredIngredients", "recipe"],
